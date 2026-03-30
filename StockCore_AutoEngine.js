@@ -1,4 +1,4 @@
-/**
+/**DEMO-2026.03.30
  * 股票管理系統 - 獨立腳本修復版 (Standalone Fix)
  * 修正重點：
  * 1. [強制指定ID] 移除所有 getActiveSpreadsheet()，改用 getSS()。
@@ -7,7 +7,7 @@
 
 // ★★★ 1. 全域設定 ★★★
 // 請確認這個 ID 是正確的 (從您的截圖看是對的)
-const SHEET_ID = "15wGWF9y8cP3NKNjc6140tk4nrZkftZCI-w6uNHKOL0Q"; 
+const SHEET_ID = "1NiasjvSXYRBqWSVOVd367HyLbWsVMfuyQcxph4oEHzM"; 
 
 // ★★★ 2. 共用小幫手 (核心修正) ★★★
 function getSS() {
@@ -50,8 +50,8 @@ try {
     // 2. 檢查並寫入股票分割里程碑
     checkAndExecuteSplits();
     
-    // 3. 🕷️ 執行 Yahoo 除權息爬蟲 (使用手動後台登錄，這裡不執行)
-    //autoFetchDividend();
+    // 3. 🕷️ 執行 Yahoo 除權息爬蟲 (★ 使用手動後台加入除權息資料，此處不執行。)
+    // autoFetchDividend();
     
     // 4. 產出最新庫存報表
     const result = generateInventoryReport(); 
@@ -528,6 +528,7 @@ function checkAndExecuteDCA() {
 
   // 2. 逐一檢查設定檔
   settings.forEach((row, index) => {
+    let dcaSettingId = row[0]; // ★ 抓取 A欄：定期定額設定單的 ID
     let stockId = String(row[1]).trim();
     let checkDay = parseInt(row[2]);
     let amount = row[3];
@@ -582,7 +583,7 @@ function checkAndExecuteDCA() {
         let uniqueKey = `${stockId}_${dateStr}_${broker}_${account}`;
         
         if (!existingDCA.has(uniqueKey)) {
-          // 寫入 14 個欄位 (新增 N 欄: 投入股利金額)
+          // 寫入 15 個欄位 (新增 O 欄: 父單ID)
           newTxns.push([
             Utilities.getUuid(),           // A: ID
             dateStr,                       // B: 交易日期
@@ -596,8 +597,9 @@ function checkAndExecuteDCA() {
             "【待補價量】",                 // J: 備註
             0,                             // K: 交割金額
             account,                       // L: 帳號
-            false,                         // M: 本期含股利再投入 (★ 強制預設不勾選)
-            0                              // N: 投入股利金額 (★ 新增欄位，預設為0)
+            false,                         // M: 本期含股利再投入 (★強制預設不勾選)
+            0,                             // N: 投入股利金額 (★預設為0)
+            dcaSettingId                  // O: 父單ID (★成功綁定定期定額設定單)
           ]);
           existingDCA.add(uniqueKey); 
         }
@@ -606,11 +608,11 @@ function checkAndExecuteDCA() {
     }
   });
 
-  // 3. 寫入試算表
-  if (newTxns.length > 0) {
+  // 3. 寫入試算表(範圍改為 15 欄)
+if (newTxns.length > 0) {
     const txnLastRow = txnSheet.getLastRow();
-    txnSheet.getRange(txnLastRow + 1, 1, newTxns.length, 14).setValues(newTxns);
-    logToDebug(`✅ 成功追溯並產生 ${newTxns.length} 筆定期定額待辦紀錄！`);
+    txnSheet.getRange(txnLastRow + 1, 1, newTxns.length, 15).setValues(newTxns);
+    logToDebug(`✅ 成功追溯並產生 ${newTxns.length} 筆定期定額待辦紀錄！(已綁定父單ID)`);
   } else {
     logToDebug("定期定額檢查完畢，目前無須補登紀錄。");
   }
@@ -681,20 +683,21 @@ function checkAndExecuteSplits() {
     }
   }
 
-  // ★ 3. 讀取分割設定，並放進時間軸一起排序
-  const splitData = splitSheet.getRange(2, 1, splitLastRow - 1, 3).getValues();
-  let pendingSplits = []; // 準備要派發的分割任務
+  // ★ 3. 讀取分割設定，並放進時間軸一起排序 (改為讀取 4 欄，因為多加了 A 欄 ID)
+  const splitData = splitSheet.getRange(2, 1, splitLastRow - 1, 4).getValues();
+  let pendingSplits = []; 
 
   splitData.forEach(row => {
-    let stockId = String(row[0]).trim();
+    let settingId = row[0];                 // A: ID
+    let stockId = String(row[1]).trim();    // B: 股票代碼 (原來是 0)
+    
     if (/^\d+$/.test(stockId)) {
       while (stockId.length < 4) { stockId = "0" + stockId; }
     }
-    let splitDate = new Date(row[1]);
-    let ratio = parseFloat(row[2]);
+    let splitDate = new Date(row[2]);       // C: 分割日期 (原來是 1)
+    let ratio = parseFloat(row[3]);         // D: 分割比例 (原來是 2)
 
     if (stockId && !isNaN(splitDate.getTime()) && ratio > 0 && splitDate <= now) {
-      // 放入時間軸，幫助計算跨期分割的庫存
       txns.push({
         date: splitDate,
         stockId: stockId,
@@ -705,6 +708,7 @@ function checkAndExecuteSplits() {
       });
       
       pendingSplits.push({
+        settingId: settingId, // ★ 把設定單 ID 存起來，帶給後面的發放階段
         stockId: stockId,
         date: splitDate,
         ratio: ratio
@@ -770,7 +774,8 @@ function checkAndExecuteSplits() {
                0,                             // K: 交割金額
                account,                       // L: 帳號
                false,                         // M: 本期含股利再投入
-               0                              // N: 投入股利金額
+               0,                             // N: 投入股利金額
+               split.settingId                // O: 父單ID (★成功綁定股票分割單 ID)
              ]);
              existingSplits.add(uniqueKey);
           }
@@ -778,9 +783,9 @@ function checkAndExecuteSplits() {
     }
   });
 
-  // ★ 5. 寫入 Transactions
+  // ★ 5. 寫入 Transactions (範圍改為 15 欄)
   if (newTxns.length > 0) {
-    txnSheet.getRange(txnSheet.getLastRow() + 1, 1, newTxns.length, 14).setValues(newTxns);
+    txnSheet.getRange(txnSheet.getLastRow() + 1, 1, newTxns.length, 15).setValues(newTxns);
     logToDebug(`✅ 成功寫入 ${newTxns.length} 筆股票分割里程碑紀錄！`);
   }
 }
