@@ -1,4 +1,5 @@
 /**DEMO-2026.03.30
+ *Refactor: 優化定期定額父單 ID 回溯邏輯，導入時間軸配對 (Time-series mapping) 以解決多代設定單衝突
  * 股票管理系統 - 獨立腳本修復版 (Standalone Fix)
  * 修正重點：
  * 1. [強制指定ID] 移除所有 getActiveSpreadsheet()，改用 getSS()。
